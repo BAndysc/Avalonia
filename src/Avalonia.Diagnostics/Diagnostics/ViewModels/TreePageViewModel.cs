@@ -1,14 +1,16 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Controls.Models.TreeDataGrid;
+using Avalonia.Controls.Selection;
 using Avalonia.VisualTree;
 
 namespace Avalonia.Diagnostics.ViewModels
 {
     internal class TreePageViewModel : ViewModelBase, IDisposable
     {
-        private TreeNode? _selectedNode;
         private ControlDetailsViewModel? _details;
         private readonly ISet<string> _pinnedProperties;
 
@@ -16,12 +18,31 @@ namespace Avalonia.Diagnostics.ViewModels
         {
             MainView = mainView;
             Nodes = nodes;
+            NodesSource = new HierarchicalTreeDataGridSource<TreeNode>(nodes)
+            {
+                Columns =
+                {
+                    new HierarchicalExpanderColumn<TreeNode>(
+                        new TemplateColumn<TreeNode>("Element", "TreeNodeDataTemplate"),
+                        x => x.Children, null, x => x.IsExpanded)
+                },
+            };
+            NodesSource.Selection = Selection = new TreeDataGridRowSelectionModel<TreeNode>(NodesSource);
             _pinnedProperties = pinnedProperties;
             PropertiesFilter = new FilterViewModel();
             PropertiesFilter.RefreshFilter += (s, e) => Details?.PropertiesView?.Refresh();
 
             SettersFilter = new FilterViewModel();
             SettersFilter.RefreshFilter += (s, e) => Details?.UpdateStyleFilters();
+
+            Selection.SelectionChanged += (_, _) =>
+            {
+                Details = SelectedNode == null ? null :
+                    new ControlDetailsViewModel(this, SelectedNode.Visual, _pinnedProperties);
+                Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
+                Details?.UpdateStyleFilters();
+                RaisePropertyChanged(nameof(SelectedNode));
+            };
         }
 
         public event EventHandler<string>? ClipboardCopyRequested;
@@ -33,19 +54,27 @@ namespace Avalonia.Diagnostics.ViewModels
         public FilterViewModel SettersFilter { get; }
 
         public TreeNode[] Nodes { get; protected set; }
+        
+        public HierarchicalTreeDataGridSource<TreeNode> NodesSource { get; }
 
+        public ITreeDataGridRowSelectionModel<TreeNode> Selection { get; }
+        
         public TreeNode? SelectedNode
         {
-            get => _selectedNode;
+            get => Selection.SelectedItem;
             set
             {
-                if (RaiseAndSetIfChanged(ref _selectedNode, value))
+                if (value == SelectedNode)
+                    return;
+                
+                if (value == null)
                 {
-                    Details = value != null ?
-                        new ControlDetailsViewModel(this, value.Visual, _pinnedProperties) :
-                        null;
-                    Details?.UpdatePropertiesView(MainView.ShowImplementedInterfaces);
-                    Details?.UpdateStyleFilters();
+                    Selection.Clear();
+                    Details = null;
+                }
+                else
+                {
+                    Selection.Select(GetIndexPath(value));
                 }
             }
         }
@@ -106,8 +135,8 @@ namespace Avalonia.Diagnostics.ViewModels
 
             if (node != null)
             {
-                SelectedNode = node;
                 ExpandNode(node.Parent);
+                SelectedNode = node;
             }
         }
 
@@ -239,6 +268,21 @@ namespace Avalonia.Diagnostics.ViewModels
             }
 
             return null;
+        }
+
+        private IndexPath GetIndexPath(TreeNode node)
+        {
+            var pathToRoot = new List<int>();
+            while (node.Parent != null)
+            {
+                var parent = node.Parent;
+                var indexOfChild = ((IList)parent.Children).IndexOf(node);
+                pathToRoot.Add(indexOfChild);
+                node = parent;
+            }
+            pathToRoot.Add(0);
+            pathToRoot.Reverse();
+            return new IndexPath(pathToRoot);
         }
 
         internal void UpdatePropertiesView()
