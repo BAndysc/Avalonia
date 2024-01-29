@@ -1,6 +1,7 @@
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Selection;
 using Avalonia.Diagnostics.ViewModels;
 using Avalonia.Input;
 using Avalonia.LogicalTree;
@@ -13,13 +14,13 @@ namespace Avalonia.Diagnostics.Views
     {
         private readonly Panel _adorner;
         private AdornerLayer? _currentLayer;
-        private TreeViewItem? _hovered;
-        private TreeView _tree;
+        private TreeDataGridRow? _hovered;
+        private TreeDataGrid _tree;
 
         public TreePageView()
         {
             InitializeComponent();
-            _tree = this.GetControl<TreeView>("tree");
+            _tree = this.GetControl<TreeDataGrid>("tree");
 
             _adorner = new Panel
             {
@@ -103,7 +104,7 @@ namespace Avalonia.Diagnostics.Views
                 return;
             }
 
-            var item = source.FindLogicalAncestorOfType<TreeViewItem>();
+            var item = source.FindLogicalAncestorOfType<TreeDataGridRow>();
             if (item == _hovered)
             {
                 return;
@@ -111,7 +112,7 @@ namespace Avalonia.Diagnostics.Views
 
             RemoveAdorner(sender, e);
 
-            if (item is null || item.TreeViewOwner != _tree)
+            if (item is null)
             {
                 _hovered = null;
                 return;
@@ -128,9 +129,26 @@ namespace Avalonia.Diagnostics.Views
             if (change.Property == DataContextProperty)
             {
                 if (change.GetOldValue<object?>() is TreePageViewModel oldViewModel)
+                {
+                    oldViewModel.Selection.SelectionChanged -= SelectionChanged;
                     oldViewModel.ClipboardCopyRequested -= OnClipboardCopyRequested;
+                }
+
                 if (change.GetNewValue<object?>() is TreePageViewModel newViewModel)
+                {
+                    newViewModel.Selection.SelectionChanged += SelectionChanged;
                     newViewModel.ClipboardCopyRequested += OnClipboardCopyRequested;
+                }
+            }
+        }
+
+        private void SelectionChanged(object? sender, TreeSelectionModelSelectionChangedEventArgs<TreeNode> e)
+        {
+            if (e.SelectedItems.Count > 0 && _tree.RowsPresenter != null && _tree.Rows != null)
+            {
+                // a workaround to scroll correctly on X axis
+                var rect = new Rect(e.SelectedIndexes[0].Count * 20 - 20, 0, 0, 0);
+                _tree.RowsPresenter.BringIntoView(_tree.Rows.ModelIndexToRowIndex(e.SelectedIndexes[0]), rect);
             }
         }
 
